@@ -4,8 +4,10 @@
  * Phase 2: Memory Operations (retrieveObservations used there)
  */
 
-import { createMemory } from '@mastra/memory';
+import { Memory } from '@mastra/memory';
 import { LibSQLStore } from '@mastra/libsql';
+import type { Memory as MemoryType } from '@mastra/memory';
+import type { MastraDBMessage } from '@mastra/core/agent';
 
 const MEMORY_DIR = '/workspace/group/.mastra';
 const MEMORY_DB = 'memory.db';
@@ -52,29 +54,35 @@ export function initMemory(resourceId: string, threadId: string): void {
   mkdirSync(MEMORY_DIR, { recursive: true });
 
   const store = new LibSQLStore({
+    id: 'nanoclaw-memory',
     url: `file:${MEMORY_DIR}/${MEMORY_DB}`,
   });
 
   log(`LibSQL store at ${MEMORY_DIR}/${MEMORY_DB}`);
 
-  const memory = createMemory({
-    store,
-    observationalMemory: true,
+  // Type assertion needed: @mastra/memory types don't fully expose observationalMemory
+  // at the MemoryConstructorConfig level, but the runtime JS code correctly handles
+  // config.options.observationalMemory (see Memory class constructor in index.cjs)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const memory = new Memory({
+    storage: store,
     options: {
-      messageTokens,
-      reflection: {
-        observationTokens,
+      observationalMemory: {
+        enabled: true,
+        observation: {
+          messageTokens,
+        },
+        reflection: {
+          observationTokens,
+        },
       },
     },
-    // resourceId = chatJid per D-05
-    // threadId = sessionId per D-05
-    // Both are passed from ContainerInput in main()
-  });
+  } as any);
 
   log('Mastra Memory initialized successfully');
 
   // Store in module-level variable for retrieveObservations() in Phase 2
-  (_memoryInstance as { resourceId: string; threadId: string; memory: ReturnType<typeof createMemory> } | null) = {
+  (_memoryInstance as { resourceId: string; threadId: string; memory: MemoryType } | null) = {
     resourceId,
     threadId,
     memory,
@@ -82,35 +90,60 @@ export function initMemory(resourceId: string, threadId: string): void {
 }
 
 // Module-level reference for cross-function access
-let _memoryInstance: { resourceId: string; threadId: string; memory: ReturnType<typeof createMemory> } | null = null;
+let _memoryInstance: { resourceId: string; threadId: string; memory: MemoryType } | null = null;
 
 /**
  * Retrieve compressed observations for the current resourceId/threadId.
  * To be called by Phase 2 before-query hook.
+ *
+ * The new API uses getContext() which returns systemMessage containing
+ * observations embedded with working memory instructions.
  */
-export function retrieveObservations(resourceId: string, threadId: string): Promise<string> {
+export async function retrieveObservations(resourceId: string, threadId: string): Promise<string> {
   if (!_memoryInstance) {
     throw new Error('Memory not initialized. Call initMemory() before retrieveObservations().');
   }
   log(`Retrieving observations — resourceId=${resourceId} threadId=${threadId}`);
-  return _memoryInstance.memory.getMemories(resourceId, threadId).then(result => {
-    log(`Retrieved ${result.length} chars of observations`);
-    return result;
-  });
+  const result = await _memoryInstance.memory.getContext({ threadId, resourceId });
+  const observations = result.systemMessage ?? '';
+  log(`Retrieved ${observations.length} chars of observations`);
+  return observations;
 }
 
 /**
  * Save a user/assistant message pair as a single observation.
  * To be called by Phase 2 after-query hook.
+ *
+ * The new API uses saveMessages() which the OM engine observes automatically.
  */
 export async function saveObservation(resourceId: string, threadId: string, userMessage: string, assistantMessage: string): Promise<void> {
   if (!_memoryInstance) {
     throw new Error('Memory not initialized. Call initMemory() before saveObservation().');
   }
   log(`Saving observation — resourceId=${resourceId} threadId=${threadId} (user ${userMessage.length} chars, assistant ${assistantMessage.length} chars)`);
-  await _memoryInstance.memory.addMemories(resourceId, threadId, [
-    { role: 'user', content: userMessage },
-    { role: 'assistant', content: assistantMessage },
-  ]);
+
+  // Build MastraDBMessage with required content format (format: 2, parts array)
+  const messages: MastraDBMessage[] = [
+    {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      createdAt: new Date(),
+      content: {
+        format: 2,
+        parts: [{ type: 'text', text: userMessage }],
+      },
+    },
+    {
+      id: `assistant-${Date.now()}`,
+      role: 'assistant',
+      createdAt: new Date(),
+      content: {
+        format: 2,
+        parts: [{ type: 'text', text: assistantMessage }],
+      },
+    },
+  ];
+
+  await _memoryInstance.memory.saveMessages({ messages });
   log('Observation saved successfully');
 }
