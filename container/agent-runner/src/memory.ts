@@ -84,3 +84,17 @@ export function retrieveObservations(resourceId: string, threadId: string): Prom
   }
   return _memoryInstance.memory.getMemories(resourceId, threadId);
 }
+
+/**
+ * Save a user/assistant message pair as a single observation.
+ * To be called by Phase 2 after-query hook.
+ */
+export async function saveObservation(resourceId: string, threadId: string, userMessage: string, assistantMessage: string): Promise<void> {
+  if (!_memoryInstance) {
+    throw new Error('Memory not initialized. Call initMemory() before saveObservation().');
+  }
+  await _memoryInstance.memory.addMemories(resourceId, threadId, [
+    { role: 'user', content: userMessage },
+    { role: 'assistant', content: assistantMessage },
+  ]);
+}
