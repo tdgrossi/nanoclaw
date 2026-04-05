@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node:*)",
+      "Skill(gsd-discuss-phase)",
+      "Bash(curl -s http://127.0.0.1:10254/api/health)"
+    ]
+  }
+}
