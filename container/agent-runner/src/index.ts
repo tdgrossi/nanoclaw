@@ -19,6 +19,7 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { initMemory } from './memory.js';
 
 interface ContainerInput {
   prompt: string;
@@ -523,6 +524,9 @@ async function main(): Promise<void> {
     containerInput = JSON.parse(stdinData);
     try { fs.unlinkSync('/tmp/input.json'); } catch { /* may not exist */ }
     log(`Received input for group: ${containerInput.groupFolder}`);
+
+  // Initialize Mastra Memory eagerly per Phase 1 setup (D-03, D-06)
+  initMemory(containerInput.chatJid, containerInput.sessionId ?? 'default');
   } catch (err) {
     writeOutput({
       status: 'error',
