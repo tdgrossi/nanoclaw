@@ -345,6 +345,7 @@ async function runQuery(
   // Phase 2: Inject prior observations before query (MEM-05)
   const observations = await retrieveObservations(containerInput.chatJid, sessionId ?? 'default');
   const enrichedPrompt = observations ? `${observations}\n\n${prompt}` : prompt;
+  log(`Prompt enriched with ${observations.length} chars of prior observations`);
   stream.push(enrichedPrompt);
 
   // Poll IPC for follow-up messages and _close sentinel during the query
@@ -603,6 +604,7 @@ async function main(): Promise<void> {
             prompt,
             queryResult.assistantResponse
           );
+          log('Observation pair saved for this turn');
         } catch (err) {
           log(`Failed to save observation: ${err instanceof Error ? err.message : String(err)}`);
         }

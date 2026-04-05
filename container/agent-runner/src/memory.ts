@@ -25,6 +25,10 @@ function getEnvToken(key: string, defaultValue: number): number {
   return defaultValue;
 }
 
+function log(message: string): void {
+  console.error(`[memory] ${message}`);
+}
+
 /**
  * Initialize Mastra Memory eagerly at container startup.
  * LibSQL store persists to /workspace/group/.mastra/memory.db (per-group mounted volume).
@@ -40,6 +44,8 @@ export function initMemory(resourceId: string, threadId: string): void {
   const messageTokens = getEnvToken('MASTRA_MESSAGE_TOKENS', DEFAULT_MESSAGE_TOKENS);
   const observationTokens = getEnvToken('MASTRA_OBSERVATION_TOKENS', DEFAULT_OBSERVATION_TOKENS);
 
+  log(`Initializing Mastra Memory — resourceId=${resourceId} threadId=${threadId} messageTokens=${messageTokens} observationTokens=${observationTokens}`);
+
   // Ensure .mastra directory exists in the per-group mounted workspace
   // This directory is on the mounted volume, persisting across container restarts
   const { mkdirSync } = require('fs');
@@ -48,6 +54,8 @@ export function initMemory(resourceId: string, threadId: string): void {
   const store = new LibSQLStore({
     url: `file:${MEMORY_DIR}/${MEMORY_DB}`,
   });
+
+  log(`LibSQL store at ${MEMORY_DIR}/${MEMORY_DB}`);
 
   const memory = createMemory({
     store,
@@ -62,6 +70,8 @@ export function initMemory(resourceId: string, threadId: string): void {
     // threadId = sessionId per D-05
     // Both are passed from ContainerInput in main()
   });
+
+  log('Mastra Memory initialized successfully');
 
   // Store in module-level variable for retrieveObservations() in Phase 2
   (_memoryInstance as { resourceId: string; threadId: string; memory: ReturnType<typeof createMemory> } | null) = {
@@ -82,7 +92,11 @@ export function retrieveObservations(resourceId: string, threadId: string): Prom
   if (!_memoryInstance) {
     throw new Error('Memory not initialized. Call initMemory() before retrieveObservations().');
   }
-  return _memoryInstance.memory.getMemories(resourceId, threadId);
+  log(`Retrieving observations — resourceId=${resourceId} threadId=${threadId}`);
+  return _memoryInstance.memory.getMemories(resourceId, threadId).then(result => {
+    log(`Retrieved ${result.length} chars of observations`);
+    return result;
+  });
 }
 
 /**
@@ -93,8 +107,10 @@ export async function saveObservation(resourceId: string, threadId: string, user
   if (!_memoryInstance) {
     throw new Error('Memory not initialized. Call initMemory() before saveObservation().');
   }
+  log(`Saving observation — resourceId=${resourceId} threadId=${threadId} (user ${userMessage.length} chars, assistant ${assistantMessage.length} chars)`);
   await _memoryInstance.memory.addMemories(resourceId, threadId, [
     { role: 'user', content: userMessage },
     { role: 'assistant', content: assistantMessage },
   ]);
+  log('Observation saved successfully');
 }
